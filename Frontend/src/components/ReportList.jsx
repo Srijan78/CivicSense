@@ -108,7 +108,7 @@ export default function ReportList({ reports, onStatusChange, onRemove, adminMod
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 text-xs text-gray-500">
-                    {r.status === 'Validated' && <span className="inline-flex items-center gap-1 text-blue-700"><CheckCircle size={14} /> Validated by AI</span>}
+                    {r.status === 'Validated' && <span className="inline-flex items-center gap-1 text-blue-700"><CheckCircle size={14} /> Validated</span>}
                     {r.status === 'Rejected' && <span className="inline-flex items-center gap-1 text-rose-700"><AlertTriangle size={14} /> Marked as Fake</span>}
                   </div>
                 )}

@@ -5,6 +5,7 @@ import ReportList from './components/ReportList';
 import Leaderboard from './components/Leaderboard';
 import { User as UserIcon } from 'lucide-react';
 import MunicipalDashboard from './components/MunicipalDashboard';
+import { useAuth } from './components/AuthContext';
 
 // Heuristic scoring as graceful fallback when backend is unavailable
 function prioritizeAndScore(report) {
@@ -19,6 +20,7 @@ function prioritizeAndScore(report) {
 export default function App() {
   const [activeTab, setActiveTab] = useState('report');
   const [reports, setReports] = useState([]);
+  const { user, loading } = useAuth();
 
   const backend = import.meta.env.VITE_BACKEND_URL?.replace(/\/$/, '') || '';
 
@@ -39,29 +41,46 @@ export default function App() {
   }
 
   async function addReport(newReport) {
-    // Try backend (public) first; fall back to client-only list if not available
-    if (backend) {
-      try {
-        const res = await fetch(`${backend}/reports`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newReport),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setReports((prev) => [data, ...prev]);
-          setActiveTab('feed');
-          return;
-        }
-      } catch {
-        // ignore and fall back
-      }
+  if (!backend) {
+    const local = prioritizeAndScore({
+      id: crypto.randomUUID(),
+      ...newReport,
+      status: "Submitted",
+    });
+    setReports((prev) => [local, ...prev]);
+    setActiveTab("feed");
+    return;
+  }
+
+  try {
+    const headers = { "Content-Type": "application/json" };
+    if (user?.token) headers["Authorization"] = `Bearer ${user.token}`;
+
+    const res = await fetch(`${backend}/reports`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(newReport),
+    });
+
+    if (!res.ok) {
+      console.error("Report submission failed:", res.status, await res.text());
+      throw new Error("Unauthorized or server error");
     }
 
-    const local = prioritizeAndScore({ id: crypto.randomUUID(), ...newReport, status: 'Submitted' });
+    const data = await res.json();
+    setReports((prev) => [data, ...prev]);
+    setActiveTab("feed");
+  } catch (err) {
+    console.error("Error submitting report:", err.message);
+    const local = prioritizeAndScore({
+      id: crypto.randomUUID(),
+      ...newReport,
+      status: "Submitted (offline)",
+    });
     setReports((prev) => [local, ...prev]);
-    setActiveTab('feed');
+    setActiveTab("feed");
   }
+}
 
   const leaderboard = useMemo(() => {
     const map = new Map();
@@ -75,7 +94,7 @@ export default function App() {
 
   function navigate(tab) {
     setActiveTab(tab);
-  }
+}
   async function updateReportStatus(id, newStatus) {
   try {
     const res = await fetch(`${backend}/reports/${id}`, {
@@ -108,11 +127,12 @@ async function deleteReport(id) {
 }
 
 
-  return (
+   return (
     <div className="min-h-screen bg-gradient-to-b from-emerald-50 to-white">
       <Header activeTab={activeTab} onChange={navigate} />
 
       <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
+        {/* ---------------- Report Tab ---------------- */}
         {activeTab === 'report' && (
           <>
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 flex items-center justify-between">
@@ -121,14 +141,21 @@ async function deleteReport(id) {
                   <UserIcon />
                 </div>
                 <div>
-                  <h2 className="text-lg font-semibold">Report an issue here</h2>
+                  <h2 className="text-lg font-semibold">Report issues around your city</h2>
+                  {!user && (
+                    <p className="text-sm text-gray-500">
+                      You can view all reports below. Please sign in to submit your own.
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
 
-            <ReportForm onSubmit={addReport} />
+            {/* Show Report Form only if user is logged in */}
+            {user && <ReportForm onSubmit={addReport} />}
 
-            <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Always show reports + leaderboard */}
+            <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
               <div className="lg:col-span-2">
                 <ReportList reports={reports} />
               </div>
@@ -137,6 +164,7 @@ async function deleteReport(id) {
           </>
         )}
 
+        {/* ---------------- Feed Tab ---------------- */}
         {activeTab === 'feed' && (
           <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2">
@@ -146,21 +174,30 @@ async function deleteReport(id) {
           </section>
         )}
 
+        {/* ---------------- Leaderboard Tab ---------------- */}
         {activeTab === 'leaderboard' && <Leaderboard scores={leaderboard} />}
+
+        {/* ---------------- Municipal Dashboard Tab ---------------- */}
         {activeTab === 'municipal' && (
-  <MunicipalDashboard
-    reports={reports}
-    onStatusChange={updateReportStatus}
-    onRemove={deleteReport}
-    onCleanup={refreshReports}
-  />
-)}
-
-
+          <>
+            {user?.role === 'municipal' ? (
+              <MunicipalDashboard
+                reports={reports}
+                onStatusChange={updateReportStatus}
+                onRemove={deleteReport}
+                onCleanup={refreshReports}
+              />
+            ) : (
+              <div className="flex justify-center items-center h-64 text-lg font-semibold text-red-600">
+                ❌ Access Denied — Only Municipal Officials can access this page.
+              </div>
+            )}
+          </>
+        )}
       </main>
 
       <footer className="py-8 text-center text-xs text-gray-500">
-        Built with love for resilient cities • Civic-Sense
+        Civic Sense
       </footer>
     </div>
   );

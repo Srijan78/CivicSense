@@ -6,6 +6,10 @@ from pydantic import BaseModel
 import cloudinary
 import cloudinary.uploader
 from dotenv import load_dotenv
+from jose import jwt, JWTError
+from pydantic import EmailStr
+from fastapi import Depends, Header
+
 
 
 class ReportStatusUpdate(BaseModel):
@@ -34,48 +38,40 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# ---------- Auth Models ----------
+class RegisterRequest(BaseModel):
+    name: str
+    email: EmailStr
+    password: str
+    role: str = "user"  # allowed: "user" (citizen) or "municipal"
 
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
 
-# ---------- Auth Helpers ----------
+# ---------- JWT Helpers ----------
+def create_token(email: str, role: str):
+    payload = {
+        "sub": email,
+        "role": role,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRE_MINUTES),
+        "iat": datetime.now(timezone.utc),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
 
-# def create_token(email: str, role: str):
-#     payload = {
-#         "sub": email,
-#         "role": role,
-#         "exp": datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRE_MINUTES),
-#         "iat": datetime.now(timezone.utc),
-#     }
-#     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
-
-
-# def verify_token(authorization: Optional[str] = Header(None)):
-#     if not authorization:
-#         raise HTTPException(status_code=401, detail="Missing Authorization header")
-#     try:
-#         scheme, token = authorization.split(" ", 1)
-#         if scheme.lower() != "bearer":
-#             raise ValueError("Invalid auth scheme")
-#         data = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
-#         return {"email": data.get("sub"), "role": data.get("role")}
-#     except Exception:
-#         raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-
-# ---------- Models for requests ----------
-# class RegisterRequest(BaseModel):
-#     name: str
-#     email: EmailStr
-#     password: str
-#     role: str = "user"  # 'user' or 'municipal'
-
-
-# class LoginRequest(BaseModel):
-#     email: EmailStr
-#     password: str
-
-
-# class ReportStatusUpdate(BaseModel):
-#     status: ReportSchema.model_fields["status"].annotation  # Literal values
+def verify_token(authorization: Optional[str] = Header(None)):
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+    try:
+        scheme, token = authorization.split(" ", 1)
+        if scheme.lower() != "bearer":
+            raise ValueError("Invalid auth scheme")
+        data = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+        return {"email": data.get("sub"), "role": data.get("role")}
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid Authorization header format")
 load_dotenv()
 
 cloudinary.config(
@@ -109,51 +105,68 @@ def test_database():
 
 
 # ---------- Auth endpoints ----------
-# @app.post("/auth/register")
-# def register(req: RegisterRequest):
-#     if db is None:
-#         raise HTTPException(status_code=500, detail="Database not configured")
+@app.post("/auth/register")
+def register(req: RegisterRequest):
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
 
-#     existing = db["user"].find_one({"email": req.email})
-#     if existing:
-#         raise HTTPException(status_code=400, detail="Email already registered")
+    existing = db["user"].find_one({"email": req.email})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
 
-#     password_hash = pwd_context.hash(req.password)
-#     user_doc = {
-#         "name": req.name,
-#         "email": req.email,
-#         "role": req.role if req.role in ["user", "municipal"] else "user",
-#         "password_hash": password_hash,
-#         "is_active": True,
-#     }
-#     create_document("user", user_doc)
+    password_hash = pwd_context.hash(req.password)
+    user_doc = {
+        "name": req.name,
+        "email": req.email,
+        "role": "municipal" if req.role == "municipal" else "user",
+        "password_hash": password_hash,
+        "is_active": True,
+        "points": 0,  # 🆕 Add this field for tracking points
+    }
+    create_document("user", user_doc)
+    token = create_token(req.email, user_doc["role"])
+    return {"token": token, "user": {"name": req.name, "email": req.email, "role": user_doc["role"]}}
 
-#     token = create_token(req.email, user_doc["role"])
-#     return {"token": token, "user": {"name": req.name, "email": req.email, "role": user_doc["role"]}}
+@app.post("/auth/login")
+def login(req: LoginRequest):
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
 
+    user = db["user"].find_one({"email": req.email})
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
-# @app.post("/auth/login")
-# def login(req: LoginRequest):
-#     if db is None:
-#         raise HTTPException(status_code=500, detail="Database not configured")
+    if not pwd_context.verify(req.password, user.get("password_hash", "")):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
-#     user = db["user"].find_one({"email": req.email})
-#     if not user:
-#         raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not user.get("is_active", True):
+        raise HTTPException(status_code=403, detail="Account disabled")
 
-#     if not pwd_context.verify(req.password, user.get("password_hash", "")):
-#         raise HTTPException(status_code=401, detail="Invalid credentials")
+    token = create_token(user["email"], user.get("role", "user"))
+    return {
+        "token": token,
+        "user": {
+            "name": user.get("name"),
+            "email": user.get("email"),
+            "role": user.get("role", "user"),
+            "points": user.get("points", 0),
+        },
+    }
 
-#     if not user.get("is_active", True):
-#         raise HTTPException(status_code=403, detail="Account disabled")
+@app.get("/me")
+def me(user=Depends(verify_token)):
+    user_doc = db["user"].find_one(
+        {"email": {"$regex": f"^{user['email']}$", "$options": "i"}}
+    )
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
 
-#     token = create_token(user["email"], user.get("role", "user"))
-#     return {"token": token, "user": {"name": user.get("name"), "email": user.get("email"), "role": user.get("role", "user")}}
-
-
-# @app.get("/me")
-# def me(user=Depends(verify_token)):
-#     return {"email": user["email"], "role": user["role"]}
+    return {
+        "name": user_doc.get("name"),
+        "email": user_doc.get("email"),
+        "role": user_doc.get("role", "user"),
+        "points": user_doc.get("points", 0),
+    }
 
 
 # ---------- Report endpoints ----------
@@ -170,18 +183,17 @@ def server_score_and_status(description: str):
 
 
 @app.post("/reports")
-async def create_report(report: ReportSchema):
+async def create_report(report: ReportSchema, user=Depends(verify_token)):
     status, points = server_score_and_status(report.description)
     data = report.model_dump()
     data["status"] = status if report.status == "Submitted" else report.status
     data["pointsAwarded"] = points
+    data["email"] = user["email"]  # 🆕 Attach user email to the report
 
-    # --- handle image upload ---
     # --- handle image upload ---
     if data.get("imageUrl", "").startswith("data:image"):
         try:
             header, encoded = data["imageUrl"].split(",", 1)
-            mime_type = header.split(";")[0].split("/")[1]
             upload_result = cloudinary.uploader.upload(
                 f"data:{header.split(':')[1]},{encoded}",
                 folder="civic-sense-reports",
@@ -192,8 +204,16 @@ async def create_report(report: ReportSchema):
             print("Image upload error:", e)
             data["imageUrl"] = ""
 
-
+    # Create report in DB
     _id = create_document("report", data)
+
+    # ✅ Update user points strictly by email (case-insensitive)
+    db["user"].update_one(
+        {"email": {"$regex": f"^{user['email']}$", "$options": "i"}},
+        {"$inc": {"points": points}},
+        upsert=False
+    )
+
     return {"id": _id, **data}
 
 @app.get("/reports")
@@ -235,3 +255,20 @@ def delete_report(report_id: str):
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Report not found")
     return {"ok": True}
+
+@app.get("/user/points")
+def get_user_points(user=Depends(verify_token)):
+    user_doc = db["user"].find_one({"email": user["email"]})
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"email": user_doc["email"], "points": user_doc.get("points", 0)}
+
+@app.get("/municipal/reports")
+def municipal_reports(user=Depends(verify_token)):
+    if user["role"] != "municipal":
+        raise HTTPException(status_code=403, detail="Access restricted to municipal users")
+    docs = get_documents("report", {})
+    for d in docs:
+        d["id"] = str(d.get("_id"))
+        d.pop("_id", None)
+    return docs

@@ -115,7 +115,7 @@ export default function MapView({ center = { lat: 28.6139, lng: 77.209 }, marker
 />
 
       {!import.meta?.env?.VITE_MAPMYINDIA_TOKEN && (
-        <p className="mt-2 text-xs text-gray-500">Using OpenStreetMap tiles. Set VITE_MAPMYINDIA_TOKEN in your environment to enable MapmyIndia maps.</p>
+        <p className="mt-2 text-xs text-gray-500">OpenStreetMap</p>
       )}
     </div>
   );

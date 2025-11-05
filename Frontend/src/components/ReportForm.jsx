@@ -127,7 +127,7 @@ export default function ReportForm({ onSubmit }) {
           <p className="text-sm text-gray-500">Be the city's eyes on the ground. Earn Civic Points for helpful reports.</p>
         </div>
         <div className="hidden sm:flex items-center gap-2 text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-full text-sm">
-          <Sparkles size={16} /> AI Assist Enabled
+          <Sparkles size={16} /> Auto Assist Enabled
         </div>
       </div>
 
@@ -177,7 +177,7 @@ export default function ReportForm({ onSubmit }) {
                   checked={autoDetect}
                   onChange={(e) => setAutoDetect(e.target.checked)}
                 />
-                Auto-detect with AI
+                Auto-detect
               </label>
             </div>
             <div>

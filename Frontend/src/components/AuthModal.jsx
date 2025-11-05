@@ -28,8 +28,13 @@ export default function AuthModal({ open, onClose, onLogin, initialMode = 'user'
     if (!email || !password) return;
     setLoading(true);
     setError('');
+
     try {
-      const url = isRegister ? `${backend}/auth/register` : `${backend}/auth/login`;
+      // ✅ Updated routes to match FastAPI backend
+      const url = isRegister
+  ? `${backend}/auth/register`
+  : `${backend}/auth/login`;
+
       const body = isRegister
         ? { name: name || 'Citizen', email, password, role: mode }
         : { email, password };
@@ -39,12 +44,13 @@ export default function AuthModal({ open, onClose, onLogin, initialMode = 'user'
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.detail || 'Authentication failed');
-      }
-      const userInfo = { role: data?.user?.role || mode, email: data?.user?.email, name: data?.user?.name };
-      const token = data?.token;
+      if (!res.ok) throw new Error(data?.detail || 'Authentication failed');
+
+      // ✅ Adjusted for FastAPI response: access_token
+      const token = data?.access_token || data?.token;
+      const userInfo = { name, email, role: mode };
       onLogin?.({ ...userInfo, token });
       onClose?.();
     } catch (err) {
@@ -61,13 +67,20 @@ export default function AuthModal({ open, onClose, onLogin, initialMode = 'user'
           <div className="flex items-center gap-2">
             {mode === 'user' ? <User className="text-emerald-600" /> : <Shield className="text-emerald-600" />}
             <h3 className="text-lg font-semibold">
-              {isRegister ? (mode === 'user' ? 'Citizen Sign Up' : 'Municipal Sign Up') : (mode === 'user' ? 'Citizen Sign In' : 'Municipal Sign In')}
+              {isRegister
+                ? mode === 'user'
+                  ? 'Citizen Sign Up'
+                  : 'Municipal Sign Up'
+                : mode === 'user'
+                ? 'Citizen Sign In'
+                : 'Municipal Sign In'}
             </h3>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-md">
             <X />
           </button>
         </div>
+
         <div className="mt-4 flex gap-2">
           <button
             onClick={() => setMode('user')}
@@ -97,6 +110,7 @@ export default function AuthModal({ open, onClose, onLogin, initialMode = 'user'
               />
             </div>
           )}
+
           <div>
             <label className="block text-sm font-medium">Email</label>
             <input
@@ -108,6 +122,7 @@ export default function AuthModal({ open, onClose, onLogin, initialMode = 'user'
               required
             />
           </div>
+
           <div>
             <label className="block text-sm font-medium">Password</label>
             <input
@@ -122,19 +137,28 @@ export default function AuthModal({ open, onClose, onLogin, initialMode = 'user'
 
           {error && <div className="text-sm text-rose-600">{error}</div>}
 
-          <button type="submit" disabled={loading} className="w-full px-4 py-2 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60">
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full px-4 py-2 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
+          >
             {loading ? 'Please wait…' : isRegister ? 'Create Account' : 'Sign In'}
           </button>
+
           <p className="text-xs text-gray-500 text-center">
             {isRegister ? (
               <>
                 Already have an account?{' '}
-                <button type="button" onClick={() => setIsRegister(false)} className="text-emerald-700 hover:underline">Sign in</button>
+                <button type="button" onClick={() => setIsRegister(false)} className="text-emerald-700 hover:underline">
+                  Sign in
+                </button>
               </>
             ) : (
               <>
                 New here?{' '}
-                <button type="button" onClick={() => setIsRegister(true)} className="text-emerald-700 hover:underline">Create an account</button>
+                <button type="button" onClick={() => setIsRegister(true)} className="text-emerald-700 hover:underline">
+                  Create an account
+                </button>
               </>
             )}
           </p>
